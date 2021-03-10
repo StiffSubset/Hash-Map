@@ -1,0 +1,371 @@
+#pragma once
+
+#include <functional>
+#include <stdexcept>
+#include <tuple>
+#include <vector>
+
+template<class KeyType, class ValueType, class Hash = std::hash<KeyType>>
+class HashMap {
+private:
+    class Node {
+    private:
+        std::pair<KeyType, ValueType> elem;
+        bool has_value, was_deleted;
+
+    public:
+        Node() {
+            has_value = was_deleted = false;
+        }
+
+        Node(const std::pair<KeyType, ValueType>& _elem) {
+            elem = _elem;
+            has_value = true;
+            was_deleted = false;
+        }
+
+        void clear() {
+            has_value = was_deleted = false;
+        }
+
+        bool hasValue() const {
+            return has_value;
+        }
+
+        bool wasDeleted() const {
+            return was_deleted;
+        }
+
+        void markDeleted() {
+            was_deleted = true;
+        }
+
+        const KeyType& getKey() const {
+            return elem.first;
+        }
+
+        std::pair<KeyType, ValueType>& getPair() {
+            return elem;
+        }
+
+        const std::pair<KeyType, ValueType>& getPair() const {
+            return elem;
+        }
+    };
+
+    size_t inc(size_t pos) const {
+        pos++;
+        return (pos == table_size ? 0 : pos);
+    }
+
+    size_t getHash(const KeyType& key) const {
+        return hasher(key) % table_size;
+    }
+
+    const static size_t start_capacity = 3, start_size = 4;
+
+    Hash hasher;
+    std::vector<Node> hash_table;
+    std::vector<size_t> prev, next;
+    size_t begin_pos, end_pos;
+    size_t table_capacity, table_size, cnt_elems, cnt_del_elems;
+
+    void resize() {
+        auto cur = *this;
+        table_capacity *= 2;
+        table_size *= 2;
+        begin_pos = end_pos = table_size;
+        cnt_elems = cnt_del_elems = 0;
+        prev.resize(table_size + 1);
+        next.resize(table_size + 1);
+        hash_table.resize(table_size);
+        for (auto& node : hash_table)
+            node.clear();
+        for (auto& it : cur)
+            insert(it);
+    }
+
+    void rebuild() {
+        auto cur = *this;
+        begin_pos = end_pos = table_size;
+        cnt_elems = cnt_del_elems = 0;
+        for (auto& node : hash_table)
+            node.clear();
+        for (auto& it : cur)
+            insert(it);
+    }
+
+    void insertIterator(size_t pos) {
+        if (cnt_elems == 0) {
+            begin_pos = pos;
+            next[pos] = end_pos;
+            prev[end_pos] = pos;
+            return;
+        }
+        size_t prv = prev[end_pos];
+        next[prv] = pos;
+        prev[pos] = prv;
+        next[pos] = end_pos;
+        prev[end_pos] = pos;
+    }
+
+    void eraseIterator(size_t pos) {
+        if (pos == begin_pos) {
+            begin_pos = next[pos];
+            return;
+        }
+        size_t prv = prev[pos], nxt = next[pos];
+        next[prv] = nxt;
+        prev[nxt] = prv;
+    }
+
+
+public:
+    class iterator {
+        friend class HashMap;
+    private:
+        std::vector<Node>* table;
+        std::vector<size_t>* prev, * next;
+        size_t pos;
+
+        iterator(std::vector<Node>& _table, std::vector<size_t>& _prev, 
+            std::vector<size_t>& _next, size_t _pos) :
+            table(&_table), prev(&_prev), next(&_next), pos(_pos) {};
+
+    public:
+        iterator() {
+            pos = 0;
+            table = nullptr;
+            prev = next = nullptr;
+        }
+
+        iterator(const iterator& other) {
+            pos = other.pos;
+            table = other.table;
+            prev = other.prev;
+            next = other.next;
+        }
+
+        std::pair<const KeyType, ValueType>& operator*() const {
+            return reinterpret_cast<std::pair<const KeyType, ValueType>&>((*table)[pos].getPair());
+        }
+
+        std::pair<const KeyType, ValueType>* operator->() const {
+            return reinterpret_cast<std::pair<const KeyType, ValueType>*>(&((*table)[pos].getPair()));
+        }
+
+        bool operator == (const iterator& other) {
+            return tie(pos, table, prev, next) ==
+                tie(other.pos, other.table, other.prev, other.next);
+        }
+
+        bool operator != (const iterator& other) {
+            return tie(pos, table, prev, next) !=
+                tie(other.pos, other.table, other.prev, other.next);
+        }
+
+        iterator operator++() {
+            pos = (*next)[pos];
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator ret(*this);
+            pos = (*next)[pos];
+            return ret;
+        }
+    };
+
+    class const_iterator {
+        friend class HashMap;
+    private:
+        const std::vector<Node>* table;
+        const std::vector<size_t>* prev, * next;
+        size_t pos;
+
+        const_iterator(const std::vector<Node>& _table, const std::vector<size_t>& _prev, 
+            const std::vector<size_t>& _next, const size_t _pos) :
+            table(&_table), prev(&_prev), next(&_next), pos(_pos) {};
+
+    public:
+        const_iterator() {
+            pos = 0;
+            table = nullptr;
+            prev = next = nullptr;
+        }
+
+        const_iterator(const const_iterator& other) {
+            pos = other.pos;
+            table = other.table;
+            prev = other.prev;
+            next = other.next;
+        }
+
+        const std::pair<const KeyType, ValueType>& operator*() const {
+            return reinterpret_cast<const std::pair<const KeyType, ValueType>&>((*table)[pos].getPair());
+        }
+
+        const std::pair<const KeyType, ValueType>* operator->() const {
+            return reinterpret_cast<const std::pair<const KeyType, ValueType>*>(&((*table)[pos].getPair()));
+        }
+
+        bool operator == (const const_iterator& other) {
+            return tie(pos, table, prev, next) ==
+                tie(other.pos, other.table, other.prev, other.next);
+        }
+
+        bool operator != (const const_iterator& other) {
+            return tie(pos, table, prev, next) !=
+                tie(other.pos, other.table, other.prev, other.next);
+        }
+
+        const_iterator operator++() {
+            pos = (*next)[pos];
+            return *this;
+        }
+
+        const_iterator operator++(int) {
+            const_iterator ret(*this);
+            pos = (*next)[pos];
+            return ret;
+        }
+    };
+
+    HashMap(Hash _hasher = Hash()) : hasher(_hasher) {
+        table_capacity = start_capacity;
+        table_size = start_size;
+        begin_pos = end_pos = table_size;
+        cnt_elems = cnt_del_elems = 0;
+        prev.resize(table_size + 1);
+        next.resize(table_size + 1);
+        hash_table.resize(table_size);
+    }
+
+    template <typename Iterator>
+    HashMap(Iterator first, Iterator last, Hash _hasher = Hash()) {
+        *this = HashMap<KeyType, ValueType, Hash>(_hasher);
+        for (auto it = first; it != last; it++)
+            insert(*it);
+    }
+
+    HashMap(const std::initializer_list<std::pair<KeyType, ValueType>>& list, Hash _hasher = Hash()) {
+        *this = HashMap<KeyType, ValueType, Hash>(_hasher);
+        for (auto& it : list)
+            insert(it);
+    }
+
+    HashMap(const HashMap& other) : hasher(other.hasher) {
+        table_capacity = other.table_capacity;
+        table_size = other.table_size;
+        begin_pos = other.begin_pos;
+        end_pos = other.end_pos;
+        cnt_elems = other.cnt_elems;
+        cnt_del_elems = other.cnt_del_elems;
+        prev = other.prev;
+        next = other.next;
+        hash_table = other.hash_table;
+    }
+
+    bool empty() const {
+        return cnt_elems == 0;
+    }
+
+    size_t size() const {
+        return cnt_elems;
+    }
+
+    Hash hash_function() const {
+        return hasher;
+    }
+
+    void insert(const std::pair<KeyType, ValueType>& elem) {
+        if (cnt_elems + cnt_del_elems >= table_capacity) {
+            if (cnt_elems > cnt_del_elems)
+                resize();
+            else
+                rebuild();
+        }
+        for (size_t pos = getHash(elem.first); ; pos = inc(pos)) {
+            if (!hash_table[pos].hasValue()) {
+                hash_table[pos] = Node(elem);
+                insertIterator(pos);
+                cnt_elems++;
+                return;
+            }
+            else {
+                if (!hash_table[pos].wasDeleted() && hash_table[pos].getKey() == elem.first)
+                    return;
+            }
+        }
+    }
+
+    void erase(const KeyType& key) {
+        auto it = find(key);
+        if (it == end())
+            return;
+        cnt_elems--;
+        cnt_del_elems++;
+        eraseIterator(it.pos);
+        hash_table[it.pos].markDeleted();
+    }
+
+    iterator begin() {
+        return iterator(hash_table, prev, next, begin_pos);
+    }
+
+    iterator end() {
+        return iterator(hash_table, prev, next, end_pos);
+    }
+
+    iterator find(const KeyType& key) {
+        for (size_t pos = getHash(key); ; pos = inc(pos)) {
+            if (!hash_table[pos].hasValue())
+                return end();
+            else {
+                if (!hash_table[pos].wasDeleted() && hash_table[pos].getKey() == key)
+                    return iterator(hash_table, prev, next, pos);
+            }
+        }
+    }
+
+    const_iterator begin() const {
+        return const_iterator(hash_table, prev, next, begin_pos);
+    }
+
+    const_iterator end() const {
+        return const_iterator(hash_table, prev, next, end_pos);
+    }
+
+    const_iterator find(const KeyType& key) const {
+        for (size_t pos = getHash(key); ; pos = inc(pos)) {
+            if (!hash_table[pos].hasValue())
+                return end();
+            else {
+                if (!hash_table[pos].wasDeleted() && hash_table[pos].getKey() == key)
+                    return const_iterator(hash_table, prev, next, pos);
+            }
+        }
+    }
+
+    ValueType& operator[](const KeyType& key) {
+        auto it = find(key);
+        if (it == end()) {
+            insert(std::make_pair(key, ValueType()));
+            return find(key)->second;
+        }
+        return it->second;
+    }
+
+    const ValueType& at(const KeyType& key) const {
+        auto it = find(key);
+        if (it == end())
+            throw std::out_of_range("Index is out of range");
+        return it->second;
+    }
+
+    void clear() {
+        auto cur = *this;
+        for (auto& it : cur)
+            erase(it.first);
+    }
+};
